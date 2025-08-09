@@ -15,18 +15,18 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Spotify Playlist Creator | 音楽ファイルから自動プレイリスト作成",
   description: "ローカルの音楽ファイル名からSpotifyプレイリストを自動作成。日本の楽曲に最適化された検索機能で、簡単にお気に入りのプレイリストを作成できます。",
-  keywords: "Spotify, プレイリスト, 音楽, 自動作成, 日本, playlist creator",
-  authors: [{ name: "Andex Tokyo" }],
-  openGraph: {
-    title: "Spotify Playlist Creator",
-    description: "音楽ファイルから自動でSpotifyプレイリストを作成",
-    type: "website",
-    locale: "ja_JP",
-  },
-  twitter: {
-    card: "summary",
-    title: "Spotify Playlist Creator",
-    description: "音楽ファイルから自動でSpotifyプレイリストを作成",
+  robots: {
+    index: false,
+    follow: false,
+    nocache: true,
+    googleBot: {
+      index: false,
+      follow: false,
+      noimageindex: true,
+      'max-video-preview': -1,
+      'max-image-preview': 'none',
+      'max-snippet': -1,
+    },
   },
 };;
 
