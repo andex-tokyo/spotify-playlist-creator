@@ -32,9 +32,16 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+.env.local
 
 # vercel
 .vercel
+
+# serena memory files
+.serena/
+
+# test music folder
+Summer2025-BGM/
 
 # typescript
 *.tsbuildinfo
