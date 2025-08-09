@@ -25,10 +25,22 @@ export async function POST(req: NextRequest) {
       `track:"${searchQuery}"`, // Exact track name search
     ]
     
-    // If Japanese text is detected, add Japanese market search
-    const hasJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(searchQuery)
+    interface SpotifyTrack {
+      id: string
+      name: string
+      popularity: number
+      preview_url: string | null
+      album: {
+        release_date: string
+        images: Array<{ url: string }>
+      }
+      artists: Array<{ 
+        id: string
+        name: string 
+      }>
+    }
     
-    let allTracks: any[] = []
+    let allTracks: SpotifyTrack[] = []
     
     for (const strategy of searchStrategies) {
       const response = await axios.get('https://api.spotify.com/v1/search', {
@@ -57,7 +69,7 @@ export async function POST(req: NextRequest) {
 
     // Sort by relevance and popularity (unless it's a custom search)
     if (!filters?.customSearch) {
-      tracks.sort((a: any, b: any) => {
+      tracks.sort((a: SpotifyTrack, b: SpotifyTrack) => {
         const aName = a.name.toLowerCase()
         const bName = b.name.toLowerCase()
         const queryLower = searchQuery.toLowerCase()
@@ -88,7 +100,7 @@ export async function POST(req: NextRequest) {
       })
     } else {
       // For custom search, prioritize relevance much more than popularity
-      tracks.sort((a: any, b: any) => {
+      tracks.sort((a: SpotifyTrack, b: SpotifyTrack) => {
         const aName = a.name.toLowerCase()
         const bName = b.name.toLowerCase()
         const queryLower = searchQuery.toLowerCase()
@@ -110,8 +122,8 @@ export async function POST(req: NextRequest) {
         if (bName.includes(queryLower)) bScore += 200
         
         // Check artist names for relevance
-        const aArtists = a.artists.map((ar: any) => ar.name.toLowerCase()).join(' ')
-        const bArtists = b.artists.map((ar: any) => ar.name.toLowerCase()).join(' ')
+        const aArtists = a.artists.map((ar) => ar.name.toLowerCase()).join(' ')
+        const bArtists = b.artists.map((ar) => ar.name.toLowerCase()).join(' ')
         
         if (aArtists.includes(queryLower)) aScore += 300
         if (bArtists.includes(queryLower)) bScore += 300
@@ -129,7 +141,7 @@ export async function POST(req: NextRequest) {
     if (filters) {
       // Year filter
       if (filters.yearFrom || filters.yearTo) {
-        tracks = tracks.filter((track: any) => {
+        tracks = tracks.filter((track: SpotifyTrack) => {
           const releaseYear = new Date(track.album.release_date).getFullYear()
           if (filters.yearFrom && releaseYear < filters.yearFrom) return false
           if (filters.yearTo && releaseYear > filters.yearTo) return false
@@ -139,7 +151,7 @@ export async function POST(req: NextRequest) {
 
       // Popularity filter
       if (filters.minPopularity !== undefined) {
-        tracks = tracks.filter((track: any) => track.popularity >= filters.minPopularity)
+        tracks = tracks.filter((track: SpotifyTrack) => track.popularity >= filters.minPopularity)
       }
     }
     
@@ -148,7 +160,7 @@ export async function POST(req: NextRequest) {
     
     // Debug: Check if tracks have preview URLs
     console.log('Search query:', searchQuery)
-    console.log('Found tracks:', tracks.map((t: any) => ({
+    console.log('Found tracks:', tracks.map((t: SpotifyTrack) => ({
       name: t.name,
       artist: t.artists[0]?.name,
       preview_url: t.preview_url,
@@ -156,7 +168,7 @@ export async function POST(req: NextRequest) {
     })))
     
     // Check for exact match
-    const hasExactMatch = tracks.some((track: any) => 
+    const hasExactMatch = tracks.some((track: SpotifyTrack) => 
       track.name.toLowerCase() === searchQuery.toLowerCase()
     )
 

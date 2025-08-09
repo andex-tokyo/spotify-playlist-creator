@@ -378,6 +378,7 @@ function PlaylistCreator() {
                         }`}
                         onClick={() => selectTrack(fileIndex, track)}
                       >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={track.album.images[2]?.url || '/placeholder.png'}
                           alt={track.album.name}
@@ -409,6 +410,7 @@ function PlaylistCreator() {
                       }`}
                       onClick={() => selectTrack(fileIndex, track)}
                     >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={track.album.images[2]?.url || '/placeholder.png'}
                         alt={track.album.name}
