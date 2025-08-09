@@ -1,7 +1,19 @@
 import { NextAuthOptions } from "next-auth"
 import SpotifyProvider from "next-auth/providers/spotify"
 
-async function refreshAccessToken(token: any) {
+interface TokenType {
+  accessToken?: string
+  refreshToken?: string
+  accessTokenExpires?: number
+  error?: string
+  user?: {
+    name?: string | null
+    email?: string | null
+    image?: string | null
+  }
+}
+
+async function refreshAccessToken(token: TokenType) {
   try {
     const url = "https://accounts.spotify.com/api/token"
     
@@ -15,7 +27,7 @@ async function refreshAccessToken(token: any) {
       },
       body: new URLSearchParams({
         grant_type: "refresh_token",
-        refresh_token: token.refreshToken,
+        refresh_token: token.refreshToken || "",
       }),
     })
 
