@@ -1,19 +1,8 @@
 import { NextAuthOptions } from "next-auth"
 import SpotifyProvider from "next-auth/providers/spotify"
 
-interface TokenType {
-  accessToken?: string
-  refreshToken?: string
-  accessTokenExpires?: number
-  error?: string
-  user?: {
-    name?: string | null
-    email?: string | null
-    image?: string | null
-  }
-}
-
-async function refreshAccessToken(token: TokenType) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function refreshAccessToken(token: any) {
   try {
     const url = "https://accounts.spotify.com/api/token"
     
@@ -65,7 +54,8 @@ export const authOptions: NextAuthOptions = {
     })
   ],
   callbacks: {
-    async jwt({ token, account, user }) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    async jwt({ token, account, user }: any) {
       // Initial sign in
       if (account && user) {
         return {
@@ -84,7 +74,8 @@ export const authOptions: NextAuthOptions = {
       // Access token has expired, try to update it
       return refreshAccessToken(token)
     },
-    async session({ session, token }) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    async session({ session, token }: any) {
       session.accessToken = token.accessToken as string
       session.error = token.error
       return session
