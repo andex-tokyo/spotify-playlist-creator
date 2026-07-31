@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useSession, signIn, signOut } from 'next-auth/react'
 import { SessionProvider } from 'next-auth/react'
+import { parseBlob } from 'music-metadata'
 
 interface Track {
   uri: string
@@ -21,6 +22,11 @@ interface Track {
 interface FileTrack {
   filename: string
   extractedName: string
+  extractedArtist?: string
+  extractedAlbum?: string
+  extractedYear?: string
+  metadataSource: 'tag' | 'filename' | 'partial-tag'
+  metadataError?: string
   searchResults: Track[]
   selectedTrack?: Track
   noExactMatch?: boolean
@@ -38,10 +44,11 @@ function PlaylistCreator() {
     preferJapanese: false,
     yearFrom: '',
     yearTo: '',
-    minPopularity: 0,
-    genres: [] as string[]
+    minPopularity: 0
   })
   const [isProcessing, setIsProcessing] = useState(false)
+  const [isReadingMetadata, setIsReadingMetadata] = useState(false)
+  const [playlistError, setPlaylistError] = useState<string | null>(null)
   const [currentPreview, setCurrentPreview] = useState<string | null>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
 
@@ -67,8 +74,7 @@ function PlaylistCreator() {
     // Remove underscores at the beginning
     name = name.replace(/^_+/, '')
     
-    // Clean up the track name but keep feat. info for better matching
-    name = name.replace(/\s*\([^)]*\)$/g, '') // Remove parentheses at the end
+    // Clean up the track name but keep version and feat. info for better matching
     name = name.replace(/\s+[-_]\s+/, ' - ') // Normalize separators
     
     // Special handling for specific patterns
@@ -83,19 +89,71 @@ function PlaylistCreator() {
     return name.trim()
   }
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const cleanTagValue = (value?: string | null) => {
+    return value?.replace(/\s+/g, ' ').trim() || ''
+  }
+
+  const getYearFromDate = (date?: string) => {
+    const match = date?.match(/\d{4}/)
+    return match?.[0]
+  }
+
+  const readFileTrack = async (file: File): Promise<FileTrack> => {
+    const fallbackName = extractTrackName(file.name)
+
+    try {
+      const metadata = await parseBlob(file, { duration: false, skipCovers: true })
+      const title = cleanTagValue(metadata.common.title)
+      const artist = cleanTagValue(metadata.common.artist || metadata.common.albumartist)
+      const album = cleanTagValue(metadata.common.album)
+      const year = metadata.common.year?.toString() || getYearFromDate(metadata.common.date)
+
+      if (title || artist) {
+        return {
+          filename: file.name,
+          extractedName: title || fallbackName,
+          extractedArtist: artist || undefined,
+          extractedAlbum: album || undefined,
+          extractedYear: year,
+          metadataSource: title && artist ? 'tag' : 'partial-tag',
+          searchResults: []
+        }
+      }
+    } catch (error) {
+      console.warn(`Metadata read failed for ${file.name}`, error)
+      return {
+        filename: file.name,
+        extractedName: fallbackName,
+        metadataSource: 'filename',
+        metadataError: 'タグを読めなかったため、ファイル名で検索します',
+        searchResults: []
+      }
+    }
+
+    return {
+      filename: file.name,
+      extractedName: fallbackName,
+      metadataSource: 'filename',
+      searchResults: []
+    }
+  }
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const uploadedFiles = Array.from(e.target.files || [])
     const musicFiles = uploadedFiles.filter(file => 
       /\.(mp3|m4a|flac|wav)$/i.test(file.name)
     )
 
-    const fileTracks: FileTrack[] = musicFiles.map(file => ({
-      filename: file.name,
-      extractedName: extractTrackName(file.name),
-      searchResults: []
-    }))
+    setPlaylistError(null)
+    setIsReadingMetadata(true)
+    setFiles([])
 
-    setFiles(fileTracks)
+    try {
+      const fileTracks = await Promise.all(musicFiles.map(readFileTrack))
+      setFiles(fileTracks)
+    } finally {
+      setIsReadingMetadata(false)
+    }
   }
 
   const searchTracks = async () => {
@@ -114,6 +172,7 @@ function PlaylistCreator() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             query: file.extractedName,
+            artist: file.extractedArtist,
             filters
           })
         })
@@ -125,10 +184,20 @@ function PlaylistCreator() {
             updated[i].searchResults = data.tracks.slice(0, 5)
             if (data.tracks.length > 0) {
               updated[i].selectedTrack = data.tracks[0]
+            } else {
+              updated[i].selectedTrack = undefined
             }
             // Store whether exact match was found
             updated[i].noExactMatch = data.noExactMatch
             updated[i].searchQuery = data.query
+            return updated
+          })
+        } else {
+          setFiles(prev => {
+            const updated = [...prev]
+            updated[i].searchResults = []
+            updated[i].selectedTrack = undefined
+            updated[i].noExactMatch = true
             return updated
           })
         }
@@ -148,6 +217,8 @@ function PlaylistCreator() {
     })
   }
   const customSearch = async (fileIndex: number, query: string) => {
+    if (!query.trim()) return
+
     setFiles(prev => {
       const updated = [...prev]
       updated[fileIndex].customSearchQuery = query
@@ -161,6 +232,7 @@ function PlaylistCreator() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           query,
+          artist: files[fileIndex]?.extractedArtist,
           filters: { ...filters, customSearch: true }
         })
       })
@@ -200,6 +272,13 @@ function PlaylistCreator() {
       .filter(f => f.selectedTrack)
       .map(f => f.selectedTrack!.uri)
 
+    if (trackUris.length === 0) {
+      setPlaylistError('追加する曲を1曲以上選んでください')
+      return
+    }
+
+    setPlaylistError(null)
+
     try {
       const response = await fetch('/api/spotify/create-playlist', {
         method: 'POST',
@@ -214,9 +293,12 @@ function PlaylistCreator() {
       if (response.ok) {
         const data = await response.json()
         window.open(data.url, '_blank')
+      } else {
+        setPlaylistError('プレイリストを作成できませんでした')
       }
     } catch (error) {
       console.error('Playlist creation error:', error)
+      setPlaylistError('プレイリストを作成できませんでした')
     }
   }
 
@@ -253,8 +335,12 @@ function PlaylistCreator() {
             multiple
             accept=".mp3,.m4a,.flac,.wav"
             onChange={handleFileUpload}
+            disabled={isReadingMetadata}
             className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
           />
+          {isReadingMetadata && (
+            <p className="mt-2 text-sm text-gray-600">タグ情報を読み取っています...</p>
+          )}
         </div>
 
         <div>
@@ -307,7 +393,7 @@ function PlaylistCreator() {
 
         <button
           onClick={searchTracks}
-          disabled={files.length === 0 || isProcessing}
+          disabled={files.length === 0 || isProcessing || isReadingMetadata}
           className="bg-blue-500 text-white px-6 py-2 rounded-lg hover:bg-blue-600 disabled:bg-gray-300"
         >
           {isProcessing ? 'Searching...' : 'Search Tracks'}
@@ -316,15 +402,33 @@ function PlaylistCreator() {
 
       {files.length > 0 && (
         <div className="space-y-4">
+          <div className="text-sm text-gray-600">
+            {files.length} files selected / {files.filter(file => file.metadataSource === 'tag').length} with title and artist tags
+          </div>
           {files.map((file, fileIndex) => (
             <div key={fileIndex} className="border rounded-lg p-4">
               <h3 className="font-semibold mb-2">{file.filename}</h3>
-              <p className="text-sm text-gray-600 mb-3">Extracted: {file.extractedName}</p>
+              <div className="mb-3 space-y-1 text-sm text-gray-600">
+                <p>
+                  Search source:{' '}
+                  <span className="font-medium text-gray-800">
+                    {file.extractedName}
+                    {file.extractedArtist ? ` / ${file.extractedArtist}` : ''}
+                  </span>
+                </p>
+                {file.extractedAlbum && <p>Album: {file.extractedAlbum}</p>}
+                <p>
+                  {file.metadataSource === 'tag' && 'タグから曲名とアーティストを読み取りました'}
+                  {file.metadataSource === 'partial-tag' && 'タグの一部とファイル名を使います'}
+                  {file.metadataSource === 'filename' && 'タグがないためファイル名を使います'}
+                </p>
+                {file.metadataError && <p className="text-yellow-700">{file.metadataError}</p>}
+              </div>
               
               {file.noExactMatch && (
                 <div className="bg-yellow-50 border border-yellow-200 rounded p-2 mb-3">
                   <p className="text-sm text-yellow-800">
-                    ⚠️ 完全一致する曲が見つかりませんでした。類似の候補を表示しています。
+                    完全一致する曲が見つかりませんでした。類似の候補を表示しています。
                   </p>
                 </div>
               )}
@@ -428,9 +532,9 @@ function PlaylistCreator() {
                             e.stopPropagation()
                             playPreview(track.preview_url)
                           }}
-                          className="text-blue-500 hover:text-blue-700"
+                          className="text-sm text-blue-500 hover:text-blue-700"
                         >
-                          {currentPreview === track.preview_url ? '⏸️' : '▶️'}
+                          {currentPreview === track.preview_url ? 'Pause' : 'Preview'}
                         </button>
                       )}
                     </div>
@@ -449,6 +553,10 @@ function PlaylistCreator() {
         >
           Create Playlist ({files.filter(f => f.selectedTrack).length} tracks)
         </button>
+      )}
+
+      {playlistError && (
+        <p className="mt-3 text-sm text-red-600">{playlistError}</p>
       )}
 
       <audio ref={audioRef} onEnded={() => setCurrentPreview(null)} />
