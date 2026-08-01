@@ -52,6 +52,36 @@ function PlaylistCreator() {
   const [currentPreview, setCurrentPreview] = useState<string | null>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
 
+  const getReviewReason = (file: FileTrack) => {
+    if (file.metadataSource === 'filename') return 'タグなし'
+    if (file.metadataSource === 'partial-tag') return 'タグ不足'
+    if (file.searchQuery && file.searchResults.length === 0) return '候補なし'
+    if (file.noExactMatch) return '完全一致なし'
+    return null
+  }
+
+  const reviewFiles = files
+    .map((file, index) => ({ file, index, reason: getReviewReason(file) }))
+    .filter((item): item is { file: FileTrack; index: number; reason: string } => Boolean(item.reason))
+
+  const getAdjacentReviewIndex = (currentIndex: number, direction: 'next' | 'previous') => {
+    const reviewIndexes = reviewFiles.map(item => item.index)
+
+    if (direction === 'next') {
+      return reviewIndexes.find(index => index > currentIndex) ?? null
+    }
+
+    return reviewIndexes.findLast(index => index < currentIndex) ?? null
+  }
+
+  const scrollToTrack = (index: number | null) => {
+    if (index === null) return
+    document.getElementById(`track-${index}`)?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start'
+    })
+  }
+
   useEffect(() => {
     if (currentPreview && audioRef.current) {
       audioRef.current.src = currentPreview
@@ -216,7 +246,7 @@ function PlaylistCreator() {
       return updated
     })
   }
-  const customSearch = async (fileIndex: number, query: string) => {
+  const customSearch = async (fileIndex: number, query: string, artist?: string) => {
     if (!query.trim()) return
 
     setFiles(prev => {
@@ -232,7 +262,7 @@ function PlaylistCreator() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           query,
-          artist: files[fileIndex]?.extractedArtist,
+          artist,
           filters: { ...filters, customSearch: true }
         })
       })
@@ -402,12 +432,50 @@ function PlaylistCreator() {
 
       {files.length > 0 && (
         <div className="space-y-4">
-          <div className="text-sm text-gray-600">
-            {files.length} files selected / {files.filter(file => file.metadataSource === 'tag').length} with title and artist tags
+          <div className="border rounded-lg p-4">
+            <div className="flex flex-wrap items-center gap-3 text-sm text-gray-700">
+              <span>{files.length} files selected</span>
+              <span>{files.filter(file => file.metadataSource === 'tag').length} with title and artist tags</span>
+              <span>{reviewFiles.length} need review</span>
+              <span>Playlist order follows the file order below</span>
+            </div>
+
+            {reviewFiles.length > 0 && (
+              <div className="mt-3">
+                <p className="mb-2 text-sm font-medium text-yellow-800">確認が必要な曲</p>
+                <div className="flex flex-wrap gap-2">
+                  {reviewFiles.map(({ file, index, reason }) => (
+                    <a
+                      key={`${file.filename}-${index}`}
+                      href={`#track-${index}`}
+                      className="rounded border border-yellow-300 bg-yellow-50 px-2 py-1 text-xs text-yellow-900 hover:bg-yellow-100"
+                    >
+                      {index + 1}. {reason}: {file.extractedName}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
           {files.map((file, fileIndex) => (
-            <div key={fileIndex} className="border rounded-lg p-4">
-              <h3 className="font-semibold mb-2">{file.filename}</h3>
+            <div
+              key={fileIndex}
+              id={`track-${fileIndex}`}
+              className={`scroll-mt-4 border rounded-lg p-4 ${
+                getReviewReason(file) ? 'border-yellow-300 bg-yellow-50/40' : ''
+              }`}
+            >
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <span className="rounded bg-gray-100 px-2 py-1 text-xs text-gray-700">
+                  #{fileIndex + 1}
+                </span>
+                {getReviewReason(file) && (
+                  <span className="rounded bg-yellow-100 px-2 py-1 text-xs font-medium text-yellow-900">
+                    {getReviewReason(file)}
+                  </span>
+                )}
+                <h3 className="font-semibold">{file.filename}</h3>
+              </div>
               <div className="mb-3 space-y-1 text-sm text-gray-600">
                 <p>
                   Search source:{' '}
@@ -434,7 +502,7 @@ function PlaylistCreator() {
               )}
               
               {/* Custom search input */}
-              <div className="mb-3 flex gap-2">
+              <div className="mb-2 flex gap-2">
                 <input
                   type="text"
                   placeholder="カスタム検索..."
@@ -466,6 +534,43 @@ function PlaylistCreator() {
                   className="px-3 py-1 bg-red-500 text-white rounded text-sm hover:bg-red-600"
                 >
                   追加しない
+                </button>
+              </div>
+              <div className="mb-3 flex flex-wrap gap-2">
+                <button
+                  onClick={() => customSearch(fileIndex, file.extractedName, file.extractedArtist)}
+                  disabled={file.isCustomSearching}
+                  className="rounded border px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:bg-gray-100"
+                >
+                  タグで再検索
+                </button>
+                <button
+                  onClick={() => customSearch(fileIndex, file.extractedName)}
+                  disabled={file.isCustomSearching}
+                  className="rounded border px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:bg-gray-100"
+                >
+                  曲名だけで検索
+                </button>
+                <button
+                  onClick={() => customSearch(fileIndex, extractTrackName(file.filename))}
+                  disabled={file.isCustomSearching}
+                  className="rounded border px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:bg-gray-100"
+                >
+                  ファイル名で検索
+                </button>
+                <button
+                  onClick={() => scrollToTrack(getAdjacentReviewIndex(fileIndex, 'previous'))}
+                  disabled={getAdjacentReviewIndex(fileIndex, 'previous') === null}
+                  className="rounded border px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:bg-gray-100 disabled:text-gray-400"
+                >
+                  前の要確認へ
+                </button>
+                <button
+                  onClick={() => scrollToTrack(getAdjacentReviewIndex(fileIndex, 'next'))}
+                  disabled={getAdjacentReviewIndex(fileIndex, 'next') === null}
+                  className="rounded border px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:bg-gray-100 disabled:text-gray-400"
+                >
+                  次の要確認へ
                 </button>
               </div>
               
